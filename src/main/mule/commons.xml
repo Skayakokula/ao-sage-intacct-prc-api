@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:os="http://www.mulesoft.org/schema/mule/os"
+
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core
+        http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+
+        http://www.mulesoft.org/schema/mule/os
+        http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+
+        http://www.mulesoft.org/schema/mule/ee/core
+        http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+
+    <!-- ================================================= -->
+    <!-- Dispatcher -->
+    <!-- ================================================= -->
+
+    <sub-flow name="dispatcher-sub-flow">
+
+
+        <!-- Initial version only has Trustmark + vendor -->
+
+        <set-variable
+            variableName="locationId"
+            value="${locations.trustmark.locationId}" doc:name="var location Id"/>
+
+        <set-variable
+            variableName="entity"
+            value="vendor" doc:name="var entity"/>
+
+
+        <flow-ref name="check-and-process-entity-sub-flow" doc:name="check-and-process-entity-ref"/>
+
+
+    </sub-flow>
+
+
+    <!-- ================================================= -->
+    <!-- Scheduler due check -->
+    <!-- ================================================= -->
+
+    <sub-flow name="check-and-process-entity-sub-flow">
+
+
+        <set-variable
+            variableName="nextRunKey"
+            value="#[vars.locationId ++ '.' ++ vars.entity ++ '.nextRunTime']" doc:name="var nextRunKey"/>
+
+
+        <os:retrieve
+            key="#[vars.nextRunKey]"
+            objectStore="Sage_Process_Object_Store"
+            target="nextRunTime">
+
+            <os:default-value><![CDATA[#['NOT_SET']]]></os:default-value>
+
+        </os:retrieve>
+
+
+        <choice>
+
+
+            <!-- First execution -->
+
+            <when expression="#[vars.nextRunTime == 'NOT_SET']">
+
+                <flow-ref name="sage-intacct-to-dash-vendor-sub-flow" doc:name="sage-intacct-to-dash-vendor-sub-flow" doc:id="11e3a2a3-cff6-4b2b-8c16-4093813ee9bd"/>
+
+            </when>
+
+
+            <!-- Entity is due -->
+
+
+            <when expression='#[(now() &gt;&gt; "America/New_York") &lt;= ((vars.nextRunTime as DateTime))]'>
+				<flow-ref doc:name="sage-intacct-to-dash-vendor-sub-flow" doc:id="c7a1df89-234e-4d20-abe2-921b17c31fed" name="sage-intacct-to-dash-vendor-sub-flow"/>
+			</when>
+			<otherwise>
+
+                <logger
+                    level="INFO"
+                    message='#[%dw 2.0&#10;output application/json&#10;---&#10;{&#10;                        locationId: vars.locationId,&#10;                        entity: vars.entity,&#10;                        nextRunTime: vars.nextRunTime,&#10;                        message: "Entity not due"&#10;                    }]'/>
+
+            </otherwise>
+
+
+        </choice>
+
+
+    </sub-flow>
+
+
+
+    <!-- ================================================= -->
+    <!-- Entity router -->
+    <!-- ================================================= -->
+
+
+</mule>

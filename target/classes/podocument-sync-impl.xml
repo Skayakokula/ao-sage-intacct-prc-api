@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+	<sub-flow name="dash-to-sage-intacct-podocument-sub-flow" doc:id="99be9a0e-00c2-4a92-83b0-49cc2a15262c" >
+		<logger level="INFO" doc:name="PO update start log" doc:id="c16b55c3-3cc1-47bb-ba7d-245cf07be8f3" message='#[%dw 2.0&#10;output application/json&#10;---&#10;{&#10;  correlationId: correlationId,&#10;  locationId: vars.locationId,&#10;  entity: "PO update",&#10;  lastRunDate: vars.lastRunDate,&#10;  runStartTime: vars.runStartTime,&#10;  message: "PO update processing started"&#10;}]'/>
+		<ee:transform doc:name="PO Order mapping" doc:id="e5c1d4fa-96d4-4820-9835-c2b1c076979a" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<http:request
+                config-ref="Sage_HTTP_Request_Config"
+                method="POST"
+                path="${entities.podocumentPath}"
+                doc:name="request-list-path" sendCorrelationId="ALWAYS" correlationId="#[correlationId]">
+				<http:headers ><![CDATA[#[{
+    "client_id": p('secure::sage.sys.client_id'),
+	"client_secret": p('secure::sage.sys.client_secret')
+}]]]></http:headers>
+			<http:query-params><![CDATA[#[{
+    "locationId": vars.locationId,
+    "operation": "create"
+}]]]>
+                
+                </http:query-params>
+            </http:request>
+		<logger level="INFO" doc:name="PO update end log" doc:id="f8e48f1b-686d-41f5-b019-d1f68086f8f0" message='#[%dw 2.0&#10;output application/json&#10;---&#10;{&#10;  correlationId: correlationId,&#10;  locationId: vars.locationId,&#10;  entity: "POupdate",&#10;  lastRunDate: vars.lastRunDate,&#10;  runStartTime: vars.runStartTime,&#10;  message: "PO update processing completed"&#10;}]'/>
+	</sub-flow>
+</mule>

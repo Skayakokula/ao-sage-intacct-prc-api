@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd 
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd">
+	<sub-flow name="dash-to-sage-intacct-ackvendor-sub-flow" doc:id="f4eedaa4-3dea-4eae-a6ce-4cdfdf0dba01" >
+		<set-variable value="#[payload.Vendors.VendorId[0]]" doc:name="Set Variable" doc:id="e7912662-62d9-4b26-9605-fd50a77b813a" variableName="dashVendorId" />
+		<set-variable value="#[payload.Vendors.ExternalRef[0]]" doc:name="Set Variable" doc:id="c46bdbac-e120-4b64-ac89-fb0862d99578" variableName="externalRef" />
+		<until-successful maxRetries="5" doc:name="Until Successful" doc:id="f45b9c2f-fbe9-4519-9766-2e27e085a26e">
+
+            <http:request method="POST" doc:name="request-list-path" doc:id="433c5386-3836-44f6-9d1a-5cf21fbb2467" config-ref="Sage_HTTP_Request_Config" path="${entities.vendor.vendorPath}" target="vendorFetchDetails" sendCorrelationId="ALWAYS" correlationId="#[correlationId]">
+
+                <http:headers><![CDATA[#[{
+    "client_id": p('secure::sage.sys.client_id'),
+	"client_secret": p('secure::sage.sys.client_secret')
+}]]]></http:headers>
+
+                <http:query-params><![CDATA[#[{
+                    "locationId": vars.locationId,
+                    "operation": "query"
+                }]]]></http:query-params>
+
+            </http:request>
+
+        </until-successful>
+		<set-variable value='#[vars.vendorFetchDetails.data."VENDOR".VENDORID]' doc:name="Set Variable" doc:id="f53b7111-dc3f-440c-9871-b630e7ff9be4" variableName="vendorId" />
+		<choice doc:name="Choice" doc:id="b9d91f57-4075-4bce-a1d2-6048e8cb9dfc">
+
+            <when expression="#[!isEmpty(vars.vendorFetchDetails)]">
+
+                <until-successful maxRetries="5" doc:name="Until Successful" doc:id="0d2de865-d0fa-475a-8fbb-0fec6afe3e5d">
+
+                    <http:request method="POST" doc:name="request-list-path" doc:id="23ed45b5-f7bf-4a29-a2ae-df2b33eaabc6" config-ref="Sage_HTTP_Request_Config" path="${entities.vendor.vendorPath}" target="vendorListResponse" sendCorrelationId="ALWAYS" correlationId="#[correlationId]">
+
+                        <http:headers><![CDATA[#[{
+    "client_id": p('secure::sage.sys.client_id'),
+	"client_secret": p('secure::sage.sys.client_secret')
+}]]]></http:headers>
+
+                        <http:query-params><![CDATA[#[{
+                            "locationId": vars.locationId,
+                            "operation": "update",
+                            "vendorId": vars.vendorId,
+                            "dashVendorId": vars.dashVendorId
+                        }]]]></http:query-params>
+
+                    </http:request>
+
+                </until-successful>
+
+                <ee:transform doc:name="Transform Message" doc:id="98ec3dbe-2f4b-45de-82ef-de0399306c7a">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+
+            </when>
+            <otherwise>
+                <logger level="INFO" doc:name="Logger" doc:id="4a454b99-8f20-4806-b643-e9152db02782" message="External Id is not present" />
+            </otherwise>
+        </choice>
+	</sub-flow>
+	
+</mule>

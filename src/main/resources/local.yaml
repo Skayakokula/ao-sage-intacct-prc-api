@@ -1,0 +1,51 @@
+http:
+  port: "8081"
+
+scheduler:
+  cron: "0 0 * * * ?"
+  timezone: "America/New_York"
+
+sage:
+  baseUrl: "ao-sage-intacct-sys-api-dev-nt9dp8.rq1uz7.usa-e2.cloudhub.io"
+  localBaseUrl: "localhost:8082"
+
+objectStore:
+  name: "sage-process-object-store"
+
+sftp:
+  host: "34.23.213.20"
+  port: "2022"
+  username: "dash-mulesoft-transfer"
+  baseFolder: "/outbox"
+
+retry:
+  maxRetries: "1"
+  frequencyMillis: "30"
+
+locations:
+  trustmark:
+    locationId: "Trustmark"
+    enabled: "true"
+
+entities:
+  vendor:
+    enabled: "true"
+    priority: "1"
+    startHour: "1"
+
+    initialLastRunDate: "2026-10-23T00:00:00-00:00"
+
+    #batchSize: "100"
+    #maxConcurrency: "4"
+    batchAggregator: "100"
+
+
+    vendorPath: "/api/sage-intacct/data/vendor"
+    sftpFolder: "vendor"
+  podocumentPath: "/api/sage-intacct/data/podocument"
+  
+sage-papi:
+  client_id: ["0oa1pa4i0trMyCYze690", "0oa1pa4i0trMyCYze790"]
+  client_secret: ["XPLAjsHfLPN7U7iPzqVqZod4_QF6gK", "XPLAjsHfLPN7U7iPzqVqZod4_RGgRV"]
+
+    

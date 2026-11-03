@@ -1,0 +1,11 @@
+#sage:
+#  clientId: "![]"
+#  clientSecret: "![]"
+
+sftp:
+  password: "![+DyDMDUHXMfplhImCdAigGm/XJXgyOBwg/7HQlh8paqdxO/i0SxDvpL1R1kr1VbW]"
+  
+sage:
+  sys:
+    client_id: "![vjQNPajc0sFUN2NEXXES79u4Pc8ESkwfG5Rejdmn/6c=]"
+    client_secret: "![dPXWytR66IZe/6t3/019OChE+24Kodu5iYbuq+ZPA14=]"

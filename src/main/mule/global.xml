@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:file="http://www.mulesoft.org/schema/mule/file"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:sftp="http://www.mulesoft.org/schema/mule/sftp"
+
+      xmlns:os="http://www.mulesoft.org/schema/mule/os" xmlns:secure-properties="http://www.mulesoft.org/schema/mule/secure-properties" xsi:schemaLocation="
+http://www.mulesoft.org/schema/mule/sftp http://www.mulesoft.org/schema/mule/sftp/current/mule-sftp.xsd 
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd 
+        http://www.mulesoft.org/schema/mule/core
+        http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+
+        http://www.mulesoft.org/schema/mule/http
+        http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+
+        http://www.mulesoft.org/schema/mule/sftp
+        http://www.mulesoft.org/schema/mule/sftp/current/mule-sftp.xsd
+
+        http://www.mulesoft.org/schema/mule/os
+        http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+
+        http://www.mulesoft.org/schema/mule/secure-properties
+        http://www.mulesoft.org/schema/mule/secure-properties/current/mule-secure-properties.xsd
+http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd">
+
+
+    <!-- Normal Properties -->
+
+    <configuration-properties
+        file="${mule.env}.yaml"/>
+
+
+    <!-- Secure Properties -->
+
+    <secure-properties:config
+        name="Secure_Properties_Config"
+        file="${mule.env}-secure.yaml"
+        key="${mule.key}">
+    </secure-properties:config>
+
+
+    <!-- HTTP Listener -->
+
+    <http:listener-config
+        name="HTTP_Listener_Config">
+
+        <http:listener-connection
+            host="0.0.0.0"
+            port="${http.port}"/>
+
+    </http:listener-config>
+
+
+    <!-- Sage System API -->
+
+    <http:request-config
+        name="Sage_HTTP_Request_Config">
+
+        <http:request-connection
+            host="${sage.baseUrl}" protocol="HTTPS">
+			<reconnection >
+				<reconnect-forever />
+			</reconnection>
+		</http:request-connection>
+
+    </http:request-config>
+
+
+    <!-- SFTP -->
+
+    <sftp:config
+        name="SFTP_Config">
+
+        <sftp:connection
+            host="${sftp.host}"
+            port="${sftp.port}"
+            username="${sftp.username}"
+            password="${secure::sftp.password}"/>
+
+    </sftp:config>
+
+
+    <!-- Persistent Object Store -->
+
+    <os:object-store
+        name="Sage_Process_Object_Store"
+        persistent="true"/>
+	<file:config name="File_Config" doc:name="File Config" doc:id="edaaa4e2-5f42-402e-9e8e-d8d3cb5a8dda" />
+
+</mule>

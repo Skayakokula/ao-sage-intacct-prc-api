@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:sftp="http://www.mulesoft.org/schema/mule/sftp"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+
+      xmlns:os="http://www.mulesoft.org/schema/mule/os" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd 
+        http://www.mulesoft.org/schema/mule/core
+        http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+http://www.mulesoft.org/schema/mule/sftp http://www.mulesoft.org/schema/mule/sftp/current/mule-sftp.xsd">
+
+
+    <flow name="sage-process-scheduler-flow">
+
+
+        <scheduler disallowConcurrentExecution="true" doc:name="Every hour scheduler">
+
+            <scheduling-strategy>
+
+                <cron
+                    expression="${scheduler.cron}"
+                    timeZone="${scheduler.timezone}"/>
+
+            </scheduling-strategy>
+
+        </scheduler>
+
+
+        <logger
+            level="INFO"
+            message='#[{
+                correlationId: correlationId,
+                message: "Scheduler execution started"
+            }]'/>
+
+        <!-- [STUDIO:"Clear"]<os:clear doc:name="Clear" doc:id="4dd0de35-e8b9-4ab8-a547-c39f951bcdf9" objectStore="Sage_Process_Object_Store" /> [STUDIO] -->
+		<flow-ref name="dispatcher-sub-flow" doc:name="dispatcher-sub-flow-ref"/>
+
+
+    
+</flow>
+<flow name="sftp-event-listner-flow" doc:id="691a51b6-6fe5-47c6-883a-88bc5db8c794" >
+		<sftp:listener doc:name="On New or Updated File" doc:id="003f62d7-d36c-418d-ac22-d4485dc0e5a9" config-ref="SFTP_Config" directory="/Inbox">
+			<scheduling-strategy >
+				<fixed-frequency />
+			</scheduling-strategy>
+		</sftp:listener>
+		 <ee:transform doc:name="Set Variables" doc:id="ce3d0eed-7a0e-47a3-92d2-732b4898ce09">
+			<ee:message>
+			</ee:message>
+			<ee:variables>
+				<ee:set-variable variableName="locationId"><![CDATA[%dw 2.0
+output application/json
+---
+"Trustmark"]]></ee:set-variable>
+				<ee:set-variable variableName="entity"><![CDATA[%dw 2.0
+output application/json
+var mode = lower(payload.Mode)
+---
+if (mode == "poordersync") "podocument"
+else if (mode == "ackvendor") "ackvendor" 
+else "" ]]></ee:set-variable>
+				<ee:set-variable variableName="mode"><![CDATA[%dw 2.0
+output application/json
+---
+lower(payload.Mode)]]></ee:set-variable>
+				<ee:set-variable variableName="sourceSystem"><![CDATA["dash"]]></ee:set-variable>
+				<ee:set-variable variableName="targetSystem"><![CDATA["sage-intacct"]]></ee:set-variable>
+				<ee:set-variable variableName="fileName" ><![CDATA[attributes.fileName]]></ee:set-variable>
+				<ee:set-variable variableName="fileType" ><![CDATA[upper((attributes.fileName splitBy '.')[-1])]]></ee:set-variable>
+			
+</ee:variables>
+		</ee:transform>
+
+    <!-- Extract file extension -->
+
+    <!-- Prepare metadata -->
+
+    <os:store
+        key="#[attributes.path]"
+        objectStore="Sage_Process_Object_Store" doc:name="Store file Details">
+        <os:value><![CDATA[#[output application/json --- {
+            fileName: vars.fileName,
+            fileType: vars.fileType,
+            filePath: attributes.path
+}]]]></os:value>
+    </os:store>
+		<logger level="INFO" doc:name="Log the file Details" doc:id="b3380817-7bf4-4f54-9455-03e85f45500d" message='#[output application/json --- {&#10;            fileName: vars.fileName,&#10;            fileType: vars.fileType,&#10;            filePath: attributes.path&#10;        }]'/>
+		<flow-ref doc:name="generic flow ref" doc:id="09db8e4a-fbe5-46e8-87d0-631976bb3c0a" name='#[vars.sourceSystem ++ "-to-" ++ vars.targetSystem ++ "-" ++ vars.entity ++ "-sub-flow"]'/>
+		<logger level="INFO" doc:name="End logger" doc:id="7d0c0d92-ebbc-4c89-88fe-6c1f66a625a3" message='#["end logger"]'/>
+	
+</flow>
+
+</mule>

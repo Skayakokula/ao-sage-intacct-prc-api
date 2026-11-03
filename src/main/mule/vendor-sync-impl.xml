@@ -1,0 +1,387 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:file="http://www.mulesoft.org/schema/mule/file"
+	xmlns:sftp="http://www.mulesoft.org/schema/mule/sftp"
+	xmlns:batch="http://www.mulesoft.org/schema/mule/batch"
+xmlns="http://www.mulesoft.org/schema/mule/core"
+xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+xmlns:http="http://www.mulesoft.org/schema/mule/http"
+xmlns:os="http://www.mulesoft.org/schema/mule/os"
+xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xsi:schemaLocation="
+http://www.mulesoft.org/schema/mule/sftp http://www.mulesoft.org/schema/mule/sftp/current/mule-sftp.xsd 
+http://www.mulesoft.org/schema/mule/batch http://www.mulesoft.org/schema/mule/batch/current/mule-batch.xsd 
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd 
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd 
+http://www.mulesoft.org/schema/mule/core
+http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http
+http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/os
+http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+http://www.mulesoft.org/schema/mule/ee/core
+http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd">
+	
+	<sub-flow name="sage-intacct-to-dash-vendor-sub-flow" doc:id="09780b3c-ed99-4b5e-be56-addfc7c20a56">
+        <!-- ======================================== -->
+        <!-- Capture execution start -->
+        <!-- ======================================== -->
+        <set-variable
+            variableName="runStartTime"
+            value="#[now() &gt;&gt; 'America/New_York']" doc:name="vars runStartTime"/>
+        <set-variable
+            variableName="lastRunKey"
+            value="#[vars.locationId ++ '.vendor.lastRunDate']" doc:name="vars lastRunKey"/>
+        <set-variable
+            variableName="nextRunKey"
+            value="#[vars.locationId ++ '.vendor.nextRunTime']" doc:name="vars nextRunKey"/>
+        <!-- ======================================== -->
+        <!-- Retrieve last run -->
+        <!-- ======================================== -->
+        <os:retrieve
+            key="#[vars.lastRunKey]"
+            objectStore="Sage_Process_Object_Store"
+            target="lastRunDate" doc:name="Retrieve Last Run Key">
+            <os:default-value>
+                <![CDATA[${entities.vendor.initialLastRunDate}]]>
+            </os:default-value>
+        </os:retrieve>
+        <logger
+            level="INFO"
+            message='#[%dw 2.0&#10;output application/json&#10;---&#10;{&#10;  correlationId: correlationId,&#10;  locationId: vars.locationId,&#10;  entity: "vendor",&#10;  lastRunDate: vars.lastRunDate,&#10;  runStartTime: vars.runStartTime,&#10;  message: "Vendor processing started"&#10;}]'/>
+        <!-- ======================================== -->
+        <!-- Request payload -->
+        <!-- ======================================== -->
+        <ee:transform doc:name="Build Vendor List Request">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    modifiedFrom: vars.lastRunDate as DateTime
+    as String {format: "MM/dd/yyyy"}
+}
+                    ]]>
+                
+                </ee:set-payload>
+            </ee:message>
+        </ee:transform>
+        <!-- ======================================== -->
+        <!-- Sage list call -->
+        <!-- ======================================== -->
+        <until-successful
+            maxRetries="${retry.maxRetries}"
+            millisBetweenRetries="${retry.frequencyMillis}">
+            <http:request
+                config-ref="Sage_HTTP_Request_Config"
+                method="POST"
+                path="${entities.vendor.vendorPath}"
+                target="vendorListResponse" doc:name="request-list-path" sendCorrelationId="ALWAYS" correlationId="#[correlationId]">
+                <http:headers ><![CDATA[#[{
+    "client_id": p('secure::sage.sys.client_id'),
+	"client_secret": p('secure::sage.sys.client_secret')
+}]]]></http:headers>
+				<http:query-params><![CDATA[#[{
+    "locationId": vars.locationId,
+    "operation": "queryList"
+}]]]>
+                
+                </http:query-params>
+            </http:request>
+        </until-successful>
+        <!-- ======================================== -->
+        <!-- Extract + distinct + sort -->
+        <!-- ======================================== -->
+        <ee:transform doc:name="Prepare Vendor IDs">
+            <ee:variables>
+                <ee:set-variable variableName="vendorRecords"><![CDATA[%dw 2.0
+output application/json
+
+var vendors =
+    vars.vendorListResponse.data.response.operation.result.data.*VENDOR
+
+---
+{
+    VENDOR: vendors
+}]]>
+                
+                </ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+        <logger
+            level="INFO"
+            message='#[%dw 2.0&#10;output application/json&#10;---&#10;{&#10;                correlationId: correlationId,&#10;                locationId: vars.locationId,&#10;                entity: "vendor",&#10;                recordCount: sizeOf(vars.vendorRecords.VENDOR),&#10;                message: "Vendor IDs retrieved"&#10; }]'/>
+        <!-- ======================================== -->
+        <!-- No records -->
+        <!-- ======================================== -->
+        <choice>
+            <when expression="#[isEmpty(vars.vendorRecords)]">
+                <logger
+                    level="INFO"
+                    message="No vendor records found"/>
+                <flow-ref name="vendor-update-object-store-sub-flow" doc:name="vendor-update-object-store-flow"/>
+            </when>
+            <otherwise>
+                <!-- Pass vendor IDs to Batch -->
+                <set-payload value="#[%dw 2.0&#10;output application/json&#10;---&#10;vars.vendorRecords.VENDOR]" doc:name="get-vendor-ids"/>
+                <flow-ref name="vendor-processing-temp-file-prepare-sub-flow" doc:id="b8b98f1a-a5ca-4344-a73c-90eb11925789" doc:name="vendor-processing-temp-file-prepare-flow"/>
+            </otherwise>
+        </choice>
+    </sub-flow>
+    <!-- ============================================== -->
+    <!-- Object Store update after successful processing -->
+    <!-- ============================================== -->
+	<sub-flow name="vendor-processing-temp-file-prepare-sub-flow" doc:id="34a868c5-8288-49f1-96c1-bed672765ef4" >
+		<set-variable value="/Outbox/Trustmark/vendor/_temp" doc:name="var tempPath" doc:id="7103f414-5fe2-414f-b360-f725682038d4" variableName="tempPath" />
+		<set-variable value="vendor_export_temp" doc:name="var finalFileName" doc:id="162621b1-c480-4fe3-a355-1290cb4ba089" variableName="finalFileName" />
+		<!-- [STUDIO:"write-local-temp-files"]<file:write doc:name="write-local-temp-files" doc:id="cf9ea6e9-8142-4528-b526-4aec78527e8a" config-ref="File_Config" path="#[vars.tempPath&#93;" lock="true" >
+			<file:content ><![CDATA[#[""&#93;&#93;&#93;></file:content>
+		</file:write> [STUDIO] -->
+		<sftp:write doc:name="Write to Sftp" doc:id="fa474ddf-dbcb-465f-b36b-32c7943521ef" config-ref="SFTP_Config" path="#[vars.tempPath]">
+			<sftp:content ><![CDATA[#[""]]]></sftp:content>
+		</sftp:write>
+		<flow-ref doc:name="vendor-batch-launch-flow-ref" doc:id="c5d37bb8-a95c-46d4-b717-eb032c69182a" name="vendor-batch-launch-sub-flow"/>
+	</sub-flow>
+	<sub-flow name="vendor-update-object-store-sub-flow">
+        <os:store
+            key="#[vars.lastRunKey]"
+            objectStore="Sage_Process_Object_Store" doc:name="Store Last Run Key">
+            <os:value><![CDATA[#[vars.runStartTime as String]]]></os:value>
+        </os:store>
+		<set-variable
+            variableName="nextRunTime"
+            value="#[vars.runStartTime + |PT1H|]" doc:name="vars nextRunTime"/>
+		<os:store
+            key="#[vars.nextRunKey]"
+            objectStore="Sage_Process_Object_Store" doc:name="Store Next Run Key">
+            <os:value><![CDATA[#[vars.nextRunTime as String]]]></os:value>
+        </os:store>
+        <logger
+            level="INFO"
+            message='#[%dw 2.0&#10;output application/json&#10;---&#10;{&#10;	correlationId: correlationId,&#10;    locationId: vars.locationId,&#10;    entity: "vendor",&#10;    lastRunDate: vars.runStartTime,&#10;    nextRunTime: vars.nextRunTime,&#10;    message: "Object Store updated"&#10;}]'/>
+    </sub-flow>
+    <sub-flow name="vendor-batch-launch-sub-flow" doc:id="bd24e1c0-112f-41f9-823a-9433896f3c2a">
+
+        <batch:job
+            jobName="vendor-batch-job"
+            maxConcurrency="4">
+
+            <batch:process-records>
+				<batch:step name="vendor-details-step">
+					<batch:aggregator size="100">
+
+                        <!-- Build vendor details request -->
+
+                        <!-- Call Sage API -->
+
+                        <!-- Map vendor details response -->
+						<ee:transform doc:name="Build Vendor Details Request">
+                            <ee:message>
+                                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    ids: payload map ((item) ->
+        read(item, "application/json").VENDORID
+    )
+}]]></ee:set-payload>
+                            </ee:message>
+                        </ee:transform>
+						<until-successful maxRetries="${retry.maxRetries}" millisBetweenRetries="${retry.frequencyMillis}">
+						<http:request config-ref="Sage_HTTP_Request_Config" method="POST" path="${entities.vendor.vendorPath}" target="vendorDetailsResponse" doc:name="request-details-path" sendCorrelationId="ALWAYS" correlationId="#[correlationId]">
+
+                                <http:headers><![CDATA[#[{
+    "client_id": p('secure::sage.sys.client_id'),
+	"client_secret": p('secure::sage.sys.client_secret')
+}]]]></http:headers>
+
+                                <http:query-params><![CDATA[#[{
+    "locationId": vars.locationId,
+    "operation": "read"
+}]]]></http:query-params>
+
+                            </http:request>
+
+                        </until-successful>
+						<ee:transform doc:name="Map Vendor Details">
+                            <ee:message>
+								<ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+(vars.vendorDetailsResponse.data default [])
+    map ((item) -> {
+//        VendorId:
+//            item.response.operation.result.data.VENDOR.VENDORID
+//                default null,
+
+        ExternalRef:
+            item.response.operation.result.data.VENDOR.RECORDNO
+                default null,
+
+        Status:
+			(upper(item.response.operation.result.data.VENDOR.STATUS default "")) match {
+			case "ACTIVE" -> "A"
+			case "INACTIVE" -> "IA"
+			else -> null
+			},
+
+        VendorTypeId:
+            item.response.operation.result.data.VENDOR.VENDTYPE
+                default "11 – Vendor Company",
+
+        CompanyName:
+            item.response.operation.result.data.VENDOR.NAME
+                default "Vendor Company",
+
+        BillingAddress:
+            item.response.operation.result.data.VENDOR.DISPLAYCONTACT.MAILADDRESS.ADDRESS1
+                default null,
+
+        BillingCity:
+            item.response.operation.result.data.VENDOR.DISPLAYCONTACT.MAILADDRESS.CITY
+                default null,
+
+        BillingState:
+            item.response.operation.result.data.VENDOR.DISPLAYCONTACT.MAILADDRESS.STATE
+                default null,
+
+        BillingCountry:
+            item.response.operation.result.data.VENDOR.DISPLAYCONTACT.MAILADDRESS.COUNTRY
+                default null,
+
+        BillingZip:
+            item.response.operation.result.data.VENDOR.DISPLAYCONTACT.MAILADDRESS.ZIP
+                default null,
+
+        MainPhone:
+            item.response.operation.result.data.VENDOR.DISPLAYCONTACT.PHONE1
+                default "704-394-1824"
+
+//        BusinessPhone:
+//            item.response.operation.result.data.VENDOR.DISPLAYCONTACT.PHONE2
+//                default null,
+
+//        MobilePhone:
+//            item.response.operation.result.data.VENDOR.DISPLAYCONTACT.CELLPHONE
+//                default null,
+
+//        HomePhone:
+//            item.response.operation.result.data.VENDOR.DISPLAYCONTACT.PAGER
+//                default null,
+//
+//        Fax:
+//            item.response.operation.result.data.VENDOR.DISPLAYCONTACT.FAX
+//                default null,
+//
+//        Email:
+//            item.response.operation.result.data.VENDOR.DISPLAYCONTACT.EMAIL1
+//                default null
+    })
+                                ]]></ee:set-payload>
+                            </ee:message>
+							<ee:variables>
+							</ee:variables>
+                        </ee:transform>
+        
+<!-- Place immediately after Map Vendor Details,
+     inside the existing batch:aggregator. -->
+						<set-payload value="#[write(payload, 'application/json') ++ ',']" doc:name="set-payload" doc:id="5129de3c-76d4-442e-8389-371c7ccfa06e" />
+						<sftp:write doc:name="Write to Sftp" doc:id="084dc640-3bf7-45d2-af69-ca672a060508" config-ref="SFTP_Config" path="#[vars.tempPath]" mode="APPEND"/>
+						<!-- [STUDIO:"write-local-temp-files"]<file:write doc:name="write-local-temp-files" doc:id="b79db1fd-8a05-49fa-a6f8-d6499895d1df" config-ref="File_Config" path="#[vars.tempPath&#93;" mode="APPEND" lock="true" >
+						</file:write> [STUDIO] -->
+
+                    </batch:aggregator>
+
+                </batch:step>
+
+            </batch:process-records>
+
+            <!-- Batch completion -->
+            <batch:on-complete>
+
+                <choice>
+
+                    <when expression="#[payload.failedRecords > 0]">
+
+                        <logger
+                            level="ERROR"
+                            message='#[%dw 2.0&#10;output application/json&#10;---&#10;{&#10;                                correlationId: correlationId,&#10;                                locationId: vars.locationId,&#10;                                entity: "vendor",&#10;                                requestedCount: payload.totalRecords,&#10;                                processedCount: payload.successfulRecords,&#10;                                failedCount: payload.failedRecords,&#10;                                status: "FAILED"&#10;                            }]' />
+						<sftp:delete doc:name="Delete from Sftp" doc:id="f1159a50-dca7-4a0a-b6c8-97ca55a7e847" config-ref="SFTP_Config" path="/Outbox/Trustmark/vendor/_temp" />
+
+                    </when>
+
+                    <otherwise>
+						<set-variable value="#[payload.successfulRecords]" doc:name="Set Variable" doc:id="40193d2f-cda4-4091-b6f1-a0dbabf4a516" variableName="recordCount"/>
+						<!-- [STUDIO:"read-local-temp-files"]<file:read doc:name="read-local-temp-files" doc:id="51c39fd9-740e-4c3e-af08-6446d4d349c6" config-ref="File_Config" path="/Outbox/Trustmark/vendor/_temp" outputMimeType="text/plain" /> [STUDIO] -->
+						<sftp:read doc:name="Read to Sftp" doc:id="fa9b1a2f-e3fb-4b29-900e-4551b646c508" config-ref="SFTP_Config" path="/Outbox/Trustmark/vendor/_temp"/>
+						<logger level="INFO" doc:name="Logger" doc:id="eaabd9bc-fa7b-47dc-a774-fe913807ee90" message='#["Fetching the payload from SFTP temp folder" ++ payload]'/>
+						<ee:transform doc:name="trimming payload" doc:id="cb48c574-d89c-4ff2-b364-99f40c32854f">
+							<ee:message>
+								<ee:set-payload><![CDATA[%dw 2.0
+output text/plain
+var content = payload as String
+var trimmed =
+    if (endsWith(content, ","))
+        content[0 to (sizeOf(content) - 2)]
+    else
+        content
+---
+trimmed]]></ee:set-payload>
+							</ee:message>
+						</ee:transform>
+						<ee:transform doc:name="finalizing payload" doc:id="940da3f9-b7f7-40cd-8b8e-2d5785667bac">
+							<ee:message>
+								<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+var fixedJson = payload replace /\]\s*,\s*\[/ with(",")
+---
+read(fixedJson, "application/json")]]></ee:set-payload>
+							</ee:message>
+						</ee:transform>
+						<!-- [STUDIO:"write-temp-files"]<file:write doc:name="write-temp-files" doc:id="6c9cb02d-be45-4c89-b502-d801bc28c383" config-ref="File_Config" path="/opt/mule/outbound/_temp" lock="true" /> [STUDIO] -->
+						<!-- [STUDIO:"rename-temp-files"]<file:rename doc:name="rename-temp-files" doc:id="5be8ab4a-51ea-4fed-a3c7-32077522f88d" config-ref="File_Config" path="/opt/mule/outbound/_temp" to="#[vars.finalFileName&#93;" overwrite="true"/> [STUDIO] -->
+						<sftp:delete doc:name="Delete from Sftp" doc:id="bbf51af3-cf03-48a4-a866-18732e5d9cad" config-ref="SFTP_Config" path="/Outbox/Trustmark/vendor/_temp"/>
+						<flow-ref name="vendor-write-sftp-sub-flow" doc:name="vendor-write-sftp-flow-ref"/>
+
+                    </otherwise>
+
+                </choice>
+
+            </batch:on-complete>
+
+        </batch:job>
+
+    </sub-flow>
+    <sub-flow name="vendor-write-sftp-sub-flow">
+
+        <!-- Build final JSON wrapper -->
+
+        <!-- Write one JSON file -->
+
+        <!-- Update object store only after successful SFTP write -->
+        <set-variable value="#[now() &gt;&gt; 'America/New_York']" doc:name="var generatedAt" doc:id="fcd54ce8-16a8-4dba-9c8b-b3d3ad38945f" variableName="generatedAt" />
+		<set-variable value="#['vendor_' ++ (vars.generatedAt as String {format: 'yyyyMMdd_HHmmss'}) ++ '.json']" doc:name="var fileName" doc:id="cc7c2202-5dab-4d39-978d-04fe8eae918d" variableName="fileName" />
+		<set-variable value="#['${sftp.baseFolder}/' ++  vars.fileName]" doc:name="var sftpPath" doc:id="1295d741-9b01-48e8-ad53-47c52321834f" variableName="sftpPath" />
+		<ee:transform doc:name="Build Vendor Output File">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output text/plain
+var records = payload
+---
+write(
+    {
+        Mode: "VENDOR",
+        Vendors: records
+    },
+    "application/json"
+) ++ "\n"]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+		<sftp:write config-ref="SFTP_Config" path="#[vars.sftpPath]" mode="CREATE_NEW" doc:name="Write to Sftp"/>
+		<!-- [STUDIO:"Write"]<file:write doc:name="Write" doc:id="f348aac2-57eb-4ae1-9e65-fe92be34bec1" config-ref="File_Config" path="C:\Users\320011\Desktop\Alpha Omega\sftpFolder\vendorFile" mode="CREATE_NEW"/> [STUDIO] -->
+		<logger level="INFO" message='#[%dw 2.0&#10;output application/json&#10;---&#10;{				&#10;		entity: "VENDOR",&#10;        locationId: vars.locationId,&#10;        correlationId: correlationId,&#10;        generatedAt: vars.generatedAt as String,&#10;        recordCount: vars.recordCount,&#10;        sftpFile: vars.sftpPath,&#10;        status: "SUCCESS"&#10;}]' />
+		<flow-ref name="vendor-update-object-store-sub-flow" doc:name="vendor-update-object-store-ref"/>
+
+    </sub-flow>
+    
+</mule>
